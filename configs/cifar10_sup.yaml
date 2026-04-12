@@ -1,0 +1,43 @@
+# configs/cifar10_sup.yaml
+# Supervised baseline configuration for CIFAR-10
+
+algorithm: "supervised"
+dataset: "cifar10"
+num_classes: 10
+data_dir: "./data"
+
+# Data parameters
+seed: 1
+num_labeled: 50000      # Supervised learning uses the full labeled set
+
+# Ablation switch (kept for config format consistency)
+use_da: false
+
+# Training schedule
+# Supervised learning does not need 1M steps;
+# 200 epochs (one pass over the dataset per epoch) is sufficient for 95%+ accuracy
+epochs: 200
+num_it_per_epoch: null  # Trainer auto-computes from dataset length (approx. 391 steps/epoch if bs=128)
+
+# Optimization
+batch_size: 128         # Larger batch size recommended for supervised training
+lr: 0.1                 # WideResNet supervised standard starting LR
+weight_decay: 0.0005
+
+# Model architecture
+model_name: "wrn"
+depth: 28
+widen_factor: 2
+
+# Performance options
+use_amp: true
+use_torch_compile: false
+compile_mode: "reduce-overhead"
+use_fused_optimizer: false
+enable_benchmark: false
+
+# DataLoader
+num_workers: 4
+pin_memory: true
+persistent_workers: true
+prefetch_factor: 2

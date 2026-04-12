@@ -1,0 +1,44 @@
+# Data (download separately)
+/data/
+
+# Experiment outputs
+/exp_results*/
+/runs/
+
+# Model checkpoints
+*.pth
+*.pth.tar
+*.pt
+
+# Generated plots
+tools/plots/
+tools/paper_data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment
+.env
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# TensorBoard event files
+events.out.tfevents.*

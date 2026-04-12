@@ -1,0 +1,78 @@
+# configs/template_grid_sweep.yaml
+# SafeSSL baseline grid sweep config
+# Current interpretation:
+# - r_id controls the absolute amount of ID unlabeled data retained
+# - r_ood controls the absolute amount of OOD unlabeled data added
+# Therefore this is a 2D contamination surface, not a pure mixture-ratio scan.
+
+algorithm: "fixmatch"
+dataset: "cifar10"
+num_classes: 10
+data_dir: "./data"
+
+# ---------------------------------------------------------
+# Sweep variables (overwritten by grid.py)
+# ---------------------------------------------------------
+seed: 0
+num_labeled: 40
+
+# IMPORTANT:
+# r_id  = fraction of available ID unlabeled data to retain (0.0~1.0)
+# r_ood = contamination ratio: r = OOD / (ID + OOD)
+#         => n_ood = n_id * r / (1 - r)
+# Example:
+#   r_id = 1.0, r_ood = 0.0  ->  pure ID unlabeled pool
+#   r_id = 1.0, r_ood = 0.3  ->  30% of unlabeled pool is OOD (~21k OOD / ~50k ID)
+r_id: 1.0
+r_ood: 0.0
+ood_dataset: "svhn"
+
+# ---------------------------------------------------------
+# Ablation switches
+# ---------------------------------------------------------
+use_da: false
+
+# ---------------------------------------------------------
+# FixMatch core hyperparameters
+# ---------------------------------------------------------
+p_cutoff: 0.95
+lambda_u: 1.0
+mu: 7
+ema_decay: 0.999
+
+# ---------------------------------------------------------
+# Optimization
+# ---------------------------------------------------------
+epochs: 500
+num_it_per_epoch: 1024
+batch_size: 64
+lr: 0.03
+weight_decay: 0.0005
+
+# ---------------------------------------------------------
+# Model
+# ---------------------------------------------------------
+model_name: "wrn"
+depth: 28
+widen_factor: 2
+
+# ---------------------------------------------------------
+# Runtime / reproducibility
+# For research runs, prefer reproducibility first.
+# Enable use_torch_compile and use_fused_optimizer only after
+# baseline behavior is confirmed stable.
+# ---------------------------------------------------------
+use_amp: true
+use_torch_compile: false
+compile_mode: "reduce-overhead"
+use_fused_optimizer: false
+enable_benchmark: false
+
+# ---------------------------------------------------------
+# DataLoader
+# ---------------------------------------------------------
+num_workers: 4
+pin_memory: true
+persistent_workers: true
+prefetch_factor: 2
+eval_batch_size: 256

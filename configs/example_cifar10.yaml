@@ -1,0 +1,66 @@
+# configs/example_cifar10.yaml
+# Example configuration: CIFAR-10 (ID) + SVHN (OOD) contamination experiment
+#
+# This is a self-contained example that works out-of-the-box with relative paths.
+# Data will be downloaded automatically to ./data/ on first run.
+#
+# To reproduce the paper's moderate-contamination setting (r_ood=0.3, seed=0):
+#   python train_executor.py --config configs/example_cifar10.yaml
+#
+# Expected results (~200 epochs):
+#   - r_ood=0.0 baseline: ~71% test accuracy
+#   - r_ood=0.3 with SVHN: ~73% test accuracy (accuracy masking regime)
+#   - CCI rises ~130% above baseline despite accuracy staying similar
+
+algorithm: "fixmatch"
+dataset: "cifar10"
+num_classes: 10
+data_dir: "./data"
+
+# Random seed for reproducibility
+seed: 0
+
+# Number of labeled samples (40 = 4 per class for CIFAR-10)
+num_labeled: 40
+
+# OOD contamination settings
+# r_ood = OOD / (ID + OOD) contamination ratio
+# Set r_ood: 0.0 for a clean baseline, or 0.1-0.5 to study contamination effects
+r_id: 1.0
+r_ood: 0.3
+ood_dataset: "svhn"
+
+# Ablation: Distribution Alignment (disabled by default for standard FixMatch)
+use_da: false
+
+# FixMatch hyperparameters (USB standard)
+p_cutoff: 0.95
+lambda_u: 1.0
+mu: 7
+ema_decay: 0.999
+
+# Training schedule (shorter than full sweep for quick experimentation)
+epochs: 200
+num_it_per_epoch: 256
+batch_size: 64
+lr: 0.03
+weight_decay: 0.0005
+
+# Model: WideResNet-28-2
+model_name: "wrn"
+depth: 28
+widen_factor: 2
+
+# Performance settings (conservative defaults for reproducibility)
+use_amp: true
+use_torch_compile: false    # Set to true to enable torch.compile acceleration
+compile_mode: "reduce-overhead"
+use_fused_optimizer: false  # Set to true if NVIDIA Apex or PyTorch fused SGD is available
+enable_benchmark: false     # Set to true for faster training (at cost of reproducibility)
+
+# DataLoader
+num_workers: 4
+pin_memory: true
+persistent_workers: true
+prefetch_factor: 2
+eval_batch_size: 256
