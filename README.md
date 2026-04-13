@@ -27,20 +27,22 @@ C-Score consists of five metrics computed per training iteration. All are implem
 
 #### PLE — Pseudo-Label Entropy
 
-Average Shannon entropy of the unlabeled softmax distribution.
+Average Shannon entropy of the unlabeled softmax distribution. $N$ is the number of unlabeled samples in the batch and $K$ is the number of target classes.
 
-$$\text{PLE} = -\frac{1}{|U|} \sum_{i \in U} \sum_{k=1}^{C} p_k^{(i)} \log(p_k^{(i)} + \varepsilon)$$
+$$\text{PLE} = -\frac{1}{N} \sum_{i=1}^{N} \sum_{c=1}^{K} p(c|u_i) \log(p(c|u_i) + \varepsilon)$$
 
 | Value | Interpretation |
 |---|---|
 | Low (≈ 0) | Confident predictions — normal convergence |
-| High (≈ log C) | Diffuse predictions — early training or collapse |
+| High (≈ log K) | Diffuse predictions — early training or collapse |
 
 #### CCI — Class Concentration Index
 
-KL divergence from the average pseudo-label distribution to a uniform prior.
+KL divergence from the batch-mean soft class distribution $\bar{p}_c$ to the uniform prior.
 
-$$\text{CCI} = \sum_{k=1}^{C} \hat{p}_k \log\frac{\hat{p}_k}{1/C}, \quad \hat{p}_k = \frac{1}{|U|}\sum_{i \in U} p_k^{(i)}$$
+$$\bar{p}_c = \frac{1}{N} \sum_{i=1}^{N} p(c|u_i)$$
+
+$$\text{CCI} = \sum_{c=1}^{K} \bar{p}_c \log\left(\frac{\bar{p}_c}{1/K}\right)$$
 
 | Value | Interpretation |
 |---|---|
@@ -51,21 +53,31 @@ $$\text{CCI} = \sum_{k=1}^{C} \hat{p}_k \log\frac{\hat{p}_k}{1/C}, \quad \hat{p}
 
 #### Sem-Drift — Semantic Drift
 
-Average L2 distance between per-class logit centroids of labeled samples and masked pseudo-labeled unlabeled samples.
+Average L2 distance between per-class logit centroids of labeled samples and masked pseudo-labeled unlabeled samples. $z_{x,i}$ and $z_{u,j}$ are the logits of labeled and (weakly augmented) unlabeled samples, respectively; $\hat{y}_j$ is the hard pseudo-label; $m_j \in \{0,1\}$ is the confidence mask.
 
-$$\text{Sem-Drift} = \frac{1}{|C_{\text{valid}}|} \sum_{c \in C_{\text{valid}}} \left\| \bar{z}_x^{(c)} - \bar{z}_u^{(c)} \right\|_2$$
+$$\mu_L^{(c)} = \frac{1}{|\{i: y_i = c\}|} \sum_{i:\, y_i = c} z_{x,i}$$
+
+$$\mu_U^{(c)} = \frac{1}{|\{j: \hat{y}_j = c,\, m_j = 1\}|} \sum_{j:\, \hat{y}_j = c,\, m_j = 1} z_{u,j}$$
+
+$$\text{Sem-Drift} = \frac{1}{|C^{\text{valid}}|} \sum_{c \in C^{\text{valid}}} \left\| \mu_L^{(c)} - \mu_U^{(c)} \right\|_2$$
+
+where $C^{\text{valid}}$ is the set of classes for which both centroids are defined.
 
 #### Grad-Align — Gradient Alignment
 
-Cosine similarity between the labeled loss gradient and unlabeled loss gradient on the final FC layer.
+Cosine similarity between the labeled and unlabeled loss gradients on the final FC layer $W_{fc}$.
 
-$$\text{Grad-Align} = \frac{\nabla_{W_{fc}} \mathcal{L}_x \cdot \nabla_{W_{fc}} \mathcal{L}_u}{\|\nabla_{W_{fc}} \mathcal{L}_x\| \cdot \|\nabla_{W_{fc}} \mathcal{L}_u\|}$$
+$$g_x = \nabla_{W_{fc}} L_x, \quad g_u = \nabla_{W_{fc}} L_u$$
+
+$$\text{Grad-Align} = \frac{g_x^T g_u}{\|g_x\|_2 \|g_u\|_2 + \varepsilon}$$
 
 ### Oracle Metric
 
 #### OOD-FF — OOD Filtration Failure
 
-$$\text{OOD-FF} = \frac{\text{OOD pass rate}}{\text{ID pass rate} + \varepsilon}$$
+$r_{\text{ID}}$ and $r_{\text{OOD}}$ are the fractions of ID and OOD unlabeled samples that pass the confidence mask, respectively.
+
+$$\text{OOD-FF} = \frac{r_{\text{OOD}}}{r_{\text{ID}} + \varepsilon}$$
 
 Requires ground-truth ID/OOD labels — used for post-hoc analysis only.
 
