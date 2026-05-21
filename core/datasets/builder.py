@@ -8,6 +8,39 @@ from .wrapper import UnifiedDatasetWrapper
 from .augmentation import get_augmentation
 from .OOD import OODDataset
 
+
+def _try_build_dali(labeled_subset, mixed_unlb_raw, labeled_batch_size, total_steps, mu):
+    """
+    Build DALI loaders for labeled + unlabeled data.
+    Returns (labeled_loader, unlabeled_loader) or raises ImportError if DALI unavailable.
+    """
+    from .dali_loader import build_dali_loader
+
+    # Extract numpy arrays from labeled Subset
+    labeled_data   = labeled_subset.dataset.data[labeled_subset.indices]    # (N_l, H, W, C) uint8
+    labeled_labels = labeled_subset.dataset.targets[labeled_subset.indices]  # (N_l,)
+
+    # Unlabeled: RawMixedDataset already has .data and .targets as numpy arrays
+    unlabeled_data   = mixed_unlb_raw.data      # (N_u, H, W, C) uint8
+    unlabeled_labels = mixed_unlb_raw.targets   # (N_u,)
+
+    unlabeled_batch_size  = labeled_batch_size * mu
+    unlabeled_total_batches = len(unlabeled_data) // unlabeled_batch_size  # drop_last equivalent
+
+    labeled_loader = build_dali_loader(
+        labeled_data, labeled_labels,
+        batch_size=labeled_batch_size,
+        total_batches=total_steps,
+        shuffle=True,
+    )
+    unlabeled_loader = build_dali_loader(
+        unlabeled_data, unlabeled_labels,
+        batch_size=unlabeled_batch_size,
+        total_batches=unlabeled_total_batches,
+        shuffle=True,
+    )
+    return labeled_loader, unlabeled_loader
+
 class RawMixedDataset(Dataset):
     """Safe SSL: Mix ID and OOD samples with controlled ratios
 
@@ -167,16 +200,31 @@ def build_dataloader(cfg):
             cfg.get('r_id', 1.0), cfg.get('r_ood', 0.0)
         )
 
-        loaders['unlabeled'] = DataLoader(
-            UnifiedDatasetWrapper(mixed_unlb_raw, mode='supervised', transform=train_trans),
-            batch_size=labeled_batch_size * cfg.get('mu', 7),
-            shuffle=True,
-            drop_last=True,
-            pin_memory=pin_memory,
-            num_workers=workers,
-            persistent_workers=persistent_workers,
-            prefetch_factor=prefetch_factor
-        )
+        if cfg.get('use_dali', False):
+            try:
+                dali_labeled, dali_unlabeled = _try_build_dali(
+                    labeled_subset, mixed_unlb_raw,
+                    labeled_batch_size, total_steps, cfg.get('mu', 7)
+                )
+                # Override the DataLoader-based labeled loader built above
+                loaders['labeled']   = dali_labeled
+                loaders['unlabeled'] = dali_unlabeled
+                print("[DataLoader] DALI pipeline active (GPU async prefetch) — both labeled & unlabeled")
+            except Exception as e:
+                print(f"[DataLoader] WARNING: DALI init failed ({e}), falling back to DataLoader")
+                cfg['use_dali'] = False
+
+        if not cfg.get('use_dali', False):
+            loaders['unlabeled'] = DataLoader(
+                UnifiedDatasetWrapper(mixed_unlb_raw, mode='supervised', transform=train_trans),
+                batch_size=labeled_batch_size * cfg.get('mu', 7),
+                shuffle=True,
+                drop_last=True,
+                pin_memory=pin_memory,
+                num_workers=workers,
+                persistent_workers=persistent_workers,
+                prefetch_factor=prefetch_factor
+            )
 
     loaders['test'] = DataLoader(
         UnifiedDatasetWrapper(test_set, mode='supervised', transform=test_trans),

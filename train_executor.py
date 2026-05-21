@@ -5,6 +5,8 @@ import yaml
 import argparse
 import datetime
 import random
+import platform
+import subprocess
 import numpy as np
 import torch
 import torch.optim as optim
@@ -21,6 +23,45 @@ from core.algorithms.softmatch import SoftMatch
 from core.algorithms.ds3l import DS3L
 from engines.trainer import UniversalTrainer
 from engines.logger import TeeStream
+
+def print_system_info(device):
+    """Print CPU, GPU, kernel, and RAM info at experiment start."""
+    print(f"Kernel : {platform.uname().release}")
+    print(f"OS     : {platform.system()} {platform.version()[:60]}")
+
+    # CPU model and topology via lscpu
+    try:
+        lscpu = subprocess.check_output(['lscpu'], text=True, stderr=subprocess.DEVNULL)
+        keys = ('Model name', 'CPU(s)', 'Thread(s) per core', 'Core(s) per socket',
+                'Socket(s)', 'CPU max MHz', 'CPU min MHz')
+        for line in lscpu.splitlines():
+            if any(line.startswith(k) for k in keys):
+                print(f"  {line.strip()}")
+    except Exception:
+        print(f"CPU    : {platform.processor() or 'unknown'}")
+
+    # RAM
+    try:
+        with open('/proc/meminfo') as f:
+            for line in f:
+                if line.startswith('MemTotal'):
+                    kb = int(line.split()[1])
+                    print(f"RAM    : {kb / 1e6:.1f} GB")
+                    break
+    except Exception:
+        pass
+
+    # GPU (if CUDA)
+    if device.type == 'cuda':
+        props = torch.cuda.get_device_properties(0)
+        print(f"GPU    : {props.name}")
+        print(f"VRAM   : {props.total_memory / 1e9:.2f} GB")
+        print(f"SM     : {props.multi_processor_count}  |  "
+              f"Compute capability: {props.major}.{props.minor}")
+        print(f"CUDA   : {torch.version.cuda}  |  cuDNN: {torch.backends.cudnn.version()}")
+    else:
+        print("GPU    : none (CPU-only run)")
+
 
 def set_seed(seed, enable_benchmark=False):
     random.seed(seed)
@@ -92,16 +133,19 @@ def get_optimizer(model, cfg):
     use_fused_optimizer = cfg.get('use_fused_optimizer', False)
 
     if use_fused_optimizer:
+        # Priority: PyTorch native fused SGD first (better AMP GradScaler integration
+        # in PyTorch >= 2.0), then Apex FusedSGD as fallback, then standard SGD.
         try:
-            from apex.optimizers import FusedSGD
-            optimizer = FusedSGD(parameters, lr=cfg['lr'], momentum=0.9, nesterov=True)
-            print("Using NVIDIA Apex FusedSGD")
-        except (ImportError, RuntimeError):
+            optimizer = optim.SGD(parameters, lr=cfg['lr'], momentum=0.9, nesterov=True, fused=True)
+            print("Using PyTorch native fused SGD")
+        except (TypeError, RuntimeError) as e_pt:
+            print(f"WARNING: PyTorch native fused SGD unavailable ({e_pt}), trying Apex FusedSGD")
             try:
-                optimizer = optim.SGD(parameters, lr=cfg['lr'], momentum=0.9, nesterov=True, fused=True)
-                print("Using PyTorch native fused SGD")
-            except:
-                print("Fused SGD not supported, falling back to standard SGD")
+                from apex.optimizers import FusedSGD
+                optimizer = FusedSGD(parameters, lr=cfg['lr'], momentum=0.9, nesterov=True)
+                print("Using NVIDIA Apex FusedSGD")
+            except (ImportError, RuntimeError) as e_apex:
+                print(f"WARNING: Apex FusedSGD unavailable ({e_apex}), falling back to standard SGD")
                 optimizer = optim.SGD(parameters, lr=cfg['lr'], momentum=0.9, nesterov=True)
     else:
         optimizer = optim.SGD(parameters, lr=cfg['lr'], momentum=0.9, nesterov=True)
@@ -131,11 +175,14 @@ def main():
     try:
         set_seed(cfg.get('seed', 42), enable_benchmark=enable_benchmark)
 
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        # force_cpu: true in config → run entirely on CPU regardless of GPU availability
+        force_cpu = cfg.get('force_cpu', False)
+        if force_cpu:
+            device = torch.device('cpu')
+        else:
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-        if torch.cuda.is_available():
-            print(f"GPU: {torch.cuda.get_device_name(0)}")
-            print(f"VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+        print_system_info(device)
 
         loaders = build_dataloader(cfg)
         model = get_model(cfg, device)

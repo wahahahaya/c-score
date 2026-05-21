@@ -3,6 +3,7 @@ import time
 import os
 import numpy as np
 from torch.amp import autocast, GradScaler
+from torch.profiler import record_function
 from engines.logger import Logger
 from copy import deepcopy
 from core.datasets.augmentation import GPUAugmentor
@@ -35,6 +36,8 @@ class UniversalTrainer:
         self.ema_model = deepcopy(self.algorithm.model)
         for param in self.ema_model.parameters():
             param.detach_()
+
+        self.profiler = None   # set in run() when use_profiler=True
 
         self.start_epoch = 0
         self.resume_global_step = 0
@@ -98,11 +101,13 @@ class UniversalTrainer:
 
                 with torch.no_grad():
                     # Transfer each separately with non_blocking to overlap PCIe copy and CPU work
-                    x_gpu = x_raw.to(self.device, non_blocking=True)
-                    u_gpu = u_raw.to(self.device, non_blocking=True)
-                    inputs_x   = self.gpu_augmentor(x_gpu, mode='weak')
-                    inputs_u_w = self.gpu_augmentor(u_gpu, mode='weak')
-                    inputs_u_s = self.gpu_augmentor(u_gpu, mode='strong')
+                    with record_function("data_to_gpu"):
+                        x_gpu = x_raw.to(self.device, non_blocking=True)
+                        u_gpu = u_raw.to(self.device, non_blocking=True)
+                    with record_function("gpu_augment"):
+                        inputs_x   = self.gpu_augmentor(x_gpu, mode='weak')
+                        inputs_u_w = self.gpu_augmentor(u_gpu, mode='weak')
+                        inputs_u_s = self.gpu_augmentor(u_gpu, mode='strong')
 
                 data_batch = {
                     'labeled': (inputs_x, x_targets),
@@ -111,10 +116,13 @@ class UniversalTrainer:
                 }
 
                 loss, step_stats = self._train_step(data_batch, global_step)
-                self._update_ema()
+                with record_function("ema_update"):
+                    self._update_ema()
                 self.scheduler.step()  # per-iteration (USB standard)
                 self._accumulate_stats(epoch_stats, step_stats)
 
+                if self.profiler is not None:
+                    self.profiler.step()
                 if global_step % 50 == 0:
                     self.logger.log_stats(step_stats, global_step, prefix="Train")
                 global_step += 1
@@ -134,16 +142,18 @@ class UniversalTrainer:
 
     def _train_step(self, data_batch, global_step):
         self.optimizer.zero_grad(set_to_none=True)
-        with autocast('cuda', enabled=self.use_amp):
-            loss, step_stats = self.algorithm.compute_loss(data_batch, global_step)
+        with record_function("forward"):
+            with autocast('cuda', enabled=self.use_amp):
+                loss, step_stats = self.algorithm.compute_loss(data_batch, global_step)
 
-        if self.use_amp:
-            self.scaler.scale(loss).backward()
-            self.scaler.step(self.optimizer)
-            self.scaler.update()
-        else:
-            loss.backward()
-            self.optimizer.step()
+        with record_function("backward"):
+            if self.use_amp:
+                self.scaler.scale(loss).backward()
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+            else:
+                loss.backward()
+                self.optimizer.step()
         return loss, step_stats
 
     def _accumulate_stats(self, epoch_stats, step_stats):
@@ -155,6 +165,31 @@ class UniversalTrainer:
 
     def run(self):
         self.logger.log(f"Starting experiment: {self.cfg['algorithm']} (C-Score diagnostic mode)")
+
+        # torch.profiler: activated when use_profiler=true in config.
+        # Skips first epoch (warmup), then records next 2 epochs worth of iterations.
+        use_profiler = self.cfg.get('use_profiler', False) and torch.cuda.is_available()
+        if use_profiler:
+            trace_dir = os.path.join(self.save_dir, 'profiler_trace')
+            os.makedirs(trace_dir, exist_ok=True)
+            self.profiler = torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ],
+                schedule=torch.profiler.schedule(
+                    wait=self.num_it_per_epoch,   # skip epoch 1 (GPU warmup)
+                    warmup=0,
+                    active=self.num_it_per_epoch * 2,  # record epochs 2–3
+                    repeat=1,
+                ),
+                on_trace_ready=torch.profiler.tensorboard_trace_handler(trace_dir),
+                record_shapes=True,
+                profile_memory=True,
+                with_stack=False,
+            )
+            self.profiler.start()
+            self.logger.log(f"torch.profiler active — trace will be written to {trace_dir}/")
 
         global_step = self.resume_global_step
         for epoch in range(self.start_epoch, self.epochs):
@@ -200,6 +235,10 @@ class UniversalTrainer:
                     mask_dist = stats['class_mask_counts'] / it
                     self.logger.log(f"   >> Class Mask Dist: {[round(float(x), 1) for x in mask_dist]}")
                 self._save_checkpoint(epoch, global_step)
+
+        if self.profiler is not None:
+            self.profiler.stop()
+            self.logger.log("torch.profiler stopped — trace written.")
 
         self.logger.log(f"Training complete. Best accuracy: {self.best_acc:.2f}%")
         self.logger.close()
