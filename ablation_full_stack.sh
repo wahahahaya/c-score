@@ -4,17 +4,14 @@
 # acceleration component individually, starting from a bare CPU baseline.
 #
 # Components under test:
-#   1. cpu_only       — no GPU at all (baseline, slowest)
-#   2. gpu_baseline   — GPU enabled, all acceleration OFF
-#   3. +amp           — add AMP (FP16 Tensor Cores)
-#   4. +compile       — add torch.compile
-#   5. +fused_sgd     — add PyTorch native fused SGD
-#   6. +dali          — add DALI async GPU data pipeline
-#   7. full_stack     — everything ON (fastest)
-#
-# Note on cuDNN benchmark: fixed 32×32 CIFAR inputs give no measurable benefit
-# from cuDNN benchmark mode (cuDNN already selects the optimal kernel on the
-# first call). It is therefore kept ON for all GPU runs (it has zero cost).
+#   1. cpu_only        — no GPU at all (baseline, slowest)
+#   2. gpu_baseline    — GPU enabled, cuDNN benchmark OFF, all acceleration OFF
+#   3. plus_benchmark  — add cuDNN benchmark mode
+#   4. plus_amp        — add AMP (FP16 Tensor Cores)
+#   5. plus_compile    — add torch.compile
+#   6. plus_fused      — add PyTorch native fused SGD
+#   7. plus_dali       — add DALI async GPU data pipeline
+#   8. full_stack      — everything ON (fastest)
 #
 # Run from cscore project root:
 #   cd /home/arlenchen/cscore && bash ablation_full_stack.sh
@@ -44,10 +41,11 @@ MU="7"
 make_config() {
     local setting="$1"
     local force_cpu="$2"
-    local use_amp="$3"
-    local use_compile="$4"
-    local use_fused="$5"
-    local use_dali="$6"
+    local enable_benchmark="$3"
+    local use_amp="$4"
+    local use_compile="$5"
+    local use_fused="$6"
+    local use_dali="$7"
     local out_cfg="/tmp/ablation_full_${setting}.yaml"
 
     cat > "$out_cfg" <<EOF
@@ -84,7 +82,7 @@ use_amp: ${use_amp}
 use_torch_compile: ${use_compile}
 compile_mode: "reduce-overhead"
 use_fused_optimizer: ${use_fused}
-enable_benchmark: true
+enable_benchmark: ${enable_benchmark}
 use_dali: ${use_dali}
 
 num_workers: 4
@@ -100,27 +98,29 @@ EOF
 run_setting() {
     local setting="$1"
     local force_cpu="$2"
-    local use_amp="$3"
-    local use_compile="$4"
-    local use_fused="$5"
-    local use_dali="$6"
+    local enable_benchmark="$3"
+    local use_amp="$4"
+    local use_compile="$5"
+    local use_fused="$6"
+    local use_dali="$7"
 
     local out_dir="${ABLATION_DIR}/${setting}"
     mkdir -p "$out_dir"
 
     echo ""
     echo "========================================================"
-    echo "  Setting     : ${setting}"
-    echo "  force_cpu   : ${force_cpu}"
-    echo "  use_amp     : ${use_amp}"
-    echo "  torch.compile: ${use_compile}"
-    echo "  fused_sgd   : ${use_fused}"
-    echo "  DALI        : ${use_dali}"
-    echo "  Output      : ${out_dir}/"
+    echo "  Setting       : ${setting}"
+    echo "  force_cpu     : ${force_cpu}"
+    echo "  cuDNN benchmark: ${enable_benchmark}"
+    echo "  use_amp       : ${use_amp}"
+    echo "  torch.compile : ${use_compile}"
+    echo "  fused_sgd     : ${use_fused}"
+    echo "  DALI          : ${use_dali}"
+    echo "  Output        : ${out_dir}/"
     echo "========================================================"
 
     local cfg
-    cfg=$(make_config "$setting" "$force_cpu" "$use_amp" "$use_compile" "$use_fused" "$use_dali")
+    cfg=$(make_config "$setting" "$force_cpu" "$enable_benchmark" "$use_amp" "$use_compile" "$use_fused" "$use_dali")
 
     mkdir -p exp_results
     ls exp_results/ 2>/dev/null | sort > /tmp/ablation_full_before_${setting}.txt || true
@@ -164,18 +164,30 @@ run_setting() {
 }
 
 # ── Run all settings ─────────────────────────────────────────────────────────
-echo "Starting full-stack ablation (7 settings × ${EPOCHS} epochs each)"
+echo "Starting full-stack ablation (8 settings × ${EPOCHS} epochs each)"
 echo "GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo unknown)"
 echo ""
 
-#              setting         cpu    amp    compile fused  dali
-run_setting "cpu_only"     "true"  "false" "false" "false" "false"
-run_setting "gpu_baseline" "false" "false" "false" "false" "false"
-run_setting "plus_amp"     "false" "true"  "false" "false" "false"
-run_setting "plus_compile" "false" "true"  "true"  "false" "false"
-run_setting "plus_fused"   "false" "true"  "true"  "true"  "false"
-run_setting "plus_dali"    "false" "true"  "true"  "true"  "true"
-run_setting "full_stack"   "false" "true"  "true"  "true"  "true"
+# Migrate existing gpu_baseline → plus_benchmark (reuse already-completed run)
+if [ -d "${ABLATION_DIR}/gpu_baseline" ] && [ ! -d "${ABLATION_DIR}/plus_benchmark" ]; then
+    cp -r "${ABLATION_DIR}/gpu_baseline" "${ABLATION_DIR}/plus_benchmark"
+    echo "Migrated existing gpu_baseline → plus_benchmark (cuDNN ON, no other acceleration)"
+fi
+
+#              setting            cpu     benchmark  amp     compile  fused   dali
+run_setting "cpu_only"        "true"  "false"    "false" "false"  "false" "false"
+run_setting "gpu_baseline"    "false" "false"    "false" "false"  "false" "false"
+# plus_benchmark uses migrated data — skip re-running if already exists
+if [ ! -f "${ABLATION_DIR}/plus_benchmark/log.txt" ]; then
+    run_setting "plus_benchmark" "false" "true"    "false" "false"  "false" "false"
+else
+    echo "plus_benchmark already exists (migrated from old gpu_baseline) — skipping"
+fi
+run_setting "plus_amp"        "false" "true"     "true"  "false"  "false" "false"
+run_setting "plus_compile"    "false" "true"     "true"  "true"   "false" "false"
+run_setting "plus_fused"      "false" "true"     "true"  "true"   "true"  "false"
+run_setting "plus_dali"       "false" "true"     "true"  "true"   "true"  "true"
+run_setting "full_stack"      "false" "true"     "true"  "true"   "true"  "true"
 
 # ── Parse and generate summary ───────────────────────────────────────────────
 echo ""
@@ -187,8 +199,8 @@ echo "========================================================"
 import re, os
 
 ABLATION_DIR   = "ablation_full_stack_results"
-SETTINGS       = ["cpu_only", "gpu_baseline", "plus_amp", "plus_compile",
-                  "plus_fused", "plus_dali", "full_stack"]
+SETTINGS       = ["cpu_only", "gpu_baseline", "plus_benchmark", "plus_amp",
+                  "plus_compile", "plus_fused", "plus_dali", "full_stack"]
 NUM_IT         = 256
 SAMPLES_PER_IT = 512   # 64 labeled + 7×64 unlabeled
 
@@ -226,13 +238,14 @@ rows.append(f"{'Setting':<16}| {'Avg Epoch Time':<15}| {'Throughput':>14} | "
 rows.append("-" * 95)
 
 COMPONENT = {
-    "cpu_only":     "—  (CPU reference)",
-    "gpu_baseline": "GPU only (no acceleration)",
-    "plus_amp":     "+ AMP (FP16 Tensor Cores)",
-    "plus_compile": "+ torch.compile",
-    "plus_fused":   "+ PyTorch fused SGD",
-    "plus_dali":    "+ DALI async pipeline",
-    "full_stack":   "= full stack",
+    "cpu_only":        "—  (CPU reference)",
+    "gpu_baseline":    "GPU only (cuDNN benchmark OFF)",
+    "plus_benchmark":  "+ cuDNN benchmark mode",
+    "plus_amp":        "+ AMP (FP16 Tensor Cores)",
+    "plus_compile":    "+ torch.compile",
+    "plus_fused":      "+ PyTorch fused SGD",
+    "plus_dali":       "+ DALI async pipeline",
+    "full_stack":      "= full stack",
 }
 
 for s in SETTINGS:

@@ -4,6 +4,8 @@
 # Experiment outputs
 /exp_results*/
 /runs/
+/ablation_full_stack_results/
+/profiling_results/
 
 # Model checkpoints
 *.pth

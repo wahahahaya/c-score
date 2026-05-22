@@ -157,6 +157,40 @@ Accuracy masking replicates on CIFAR-100: CCI rises **+787%** while accuracy dro
 
 ---
 
+## Throughput Ablation: NVIDIA Software Stack
+
+Additive ablation measuring the contribution of each acceleration component.
+Hardware: NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition.
+Configuration: FixMatch, CIFAR-10, seed=0, 50 epochs, epoch 2–50 averaged (epoch 1 excluded as GPU warmup).
+
+| Setting | Avg Epoch Time | Throughput (samp/s) | vs GPU baseline | vs CPU | Component added |
+|---|---|---|---|---|---|
+| cpu_only | 353.71s | 371 | −94.9% | 1.00× | — (CPU reference) |
+| gpu_baseline | 24.96s | 5,252 | baseline | 14.17× | GPU only (cuDNN benchmark OFF) |
+| plus_benchmark | 17.90s | 7,324 | +39.4% | 19.76× | + cuDNN benchmark mode |
+| plus_amp | 13.20s | 9,933 | +89.1% | 26.80× | + AMP (FP16 Tensor Cores) |
+| plus_compile | 10.04s | 13,054 | +148.5% | 35.23× | + torch.compile |
+| plus_fused | 9.75s | 13,445 | +156.0% | 36.28× | + PyTorch native fused SGD |
+| plus_dali | 9.29s | 14,109 | +168.6% | 38.07× | + NVIDIA DALI async pipeline |
+| full_stack | 9.44s | 13,887 | +164.4% | 37.47× | = full stack |
+
+**Key findings:**
+- cuDNN benchmark mode alone contributes **+39.4%** by selecting optimal convolution algorithms for WRN-28-2.
+- AMP (FP16 Tensor Cores) adds a further **+35.3%** incremental gain.
+- torch.compile provides an additional **+31.4%** via kernel fusion and graph optimization.
+- NVIDIA DALI contributes **+4.8%** through asynchronous GPU prefetch of the data pipeline.
+- The full stack is **37.5× faster than CPU-only**, making the 570-run experimental sweep feasible.
+
+> Note: The primary reported experiments used cuDNN benchmark + AMP. torch.compile and DALI contributions are quantified here as supplementary analysis. "Apex FusedSGD" in the original paper text is corrected to PyTorch 2.10 native fused SGD (`torch.optim.SGD(..., fused=True)`), as Apex was installed without compiled CUDA extensions.
+
+To reproduce:
+```bash
+bash ablation_full_stack.sh
+# results written to ablation_full_stack_results/summary.txt
+```
+
+---
+
 ## Codebase Structure
 
 ```
