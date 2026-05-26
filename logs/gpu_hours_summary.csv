@@ -1,0 +1,6 @@
+algorithm,labeled_dataset,description,num_runs,total_gpu_hours
+fixmatch,cifar10,FixMatch OOD-type sweep (6 OOD sources × r × seeds),155,116.59
+flexmatch,cifar10,FlexMatch algorithm sweep (6 OOD sources × r × seeds),155,118.55
+ds3l,cifar10,DS3L algorithm sweep (6 OOD sources × r × seeds),155,123.04
+softmatch,cifar10,SoftMatch algorithm sweep (6 OOD sources × r × seeds),155,123.53
+fixmatch,cifar100,FixMatch CIFAR-100 as labeled data (r sweep × seeds),30,317.73

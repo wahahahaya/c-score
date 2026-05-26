@@ -247,10 +247,14 @@ cscore/
 │   ├── analysis.py            # Log parsing → CSV + curves
 │   └── aggregate_results.py   # Aggregate mean±std across seeds
 │
-└── configs/
-    ├── template_grid_sweep.yaml
-    ├── example_cifar10.yaml
-    └── cifar10_sup.yaml
+├── configs/
+│   ├── template_grid_sweep.yaml
+│   ├── example_cifar10.yaml
+│   └── cifar10_sup.yaml
+│
+└── logs/
+    ├── gpu_hours_per_run.csv
+    └── gpu_hours_summary.csv
 ```
 
 ---
