@@ -157,6 +157,23 @@ Accuracy masking replicates on CIFAR-100: CCI rises **+787%** while accuracy dro
 
 ---
 
+## Compute Budget
+
+FixMatch experiments were run on an **NVIDIA RTX PRO 6000 Blackwell Max-Q** Workstation Edition.
+FlexMatch, SoftMatch, and DS3L experiments were run on an **NVIDIA L40S** via NVIDIA Brev.
+
+### GPU Hours by Experiment
+
+| Algorithm | Labeled Dataset | Runs | GPU Hours | Throughput |
+|---|---|:---:|---:|---:|
+| FixMatch | CIFAR-10 | 155 | 116.59 | 9,859 samp/s |
+| FlexMatch | CIFAR-10 | 155 | 118.55 | 9,532 samp/s |
+| DS3L | CIFAR-10 | 155 | 123.04 | 9,168 samp/s |
+| SoftMatch | CIFAR-10 | 155 | 123.53 | 9,130 samp/s |
+| **Total (unique)** | | **620** | **481.7** | |
+
+---
+
 ## Throughput Ablation: NVIDIA Software Stack
 
 Additive ablation measuring the contribution of each acceleration component.
@@ -180,8 +197,6 @@ Configuration: FixMatch, CIFAR-10, seed=0, 50 epochs, epoch 2–50 averaged (epo
 - torch.compile provides an additional **+31.4%** via kernel fusion and graph optimization.
 - NVIDIA DALI contributes **+4.8%** through asynchronous GPU prefetch of the data pipeline.
 - The full stack is **37.5× faster than CPU-only**, making the 570-run experimental sweep feasible.
-
-> Note: The primary reported experiments used cuDNN benchmark + AMP. torch.compile and DALI contributions are quantified here as supplementary analysis. "Apex FusedSGD" in the original paper text is corrected to PyTorch 2.10 native fused SGD (`torch.optim.SGD(..., fused=True)`), as Apex was installed without compiled CUDA extensions.
 
 To reproduce:
 ```bash

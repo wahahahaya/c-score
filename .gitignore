@@ -6,6 +6,7 @@
 /runs/
 /ablation_full_stack_results/
 /profiling_results/
+/log/
 
 # Model checkpoints
 *.pth
